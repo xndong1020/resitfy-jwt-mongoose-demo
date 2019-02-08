@@ -170,7 +170,7 @@ module.exports = User
 Please note for 'email' we are using a custom validation, and for 'role' we will check if the value is in 'userRole' enum values
 As we are using Mongoose validation, we don't need to use other server validation rules in the routes.
 
-## Step 05: We added 2 custom middleware to demo how to do req validation, as well as error handling in Express/Restify
+## Step 05: We added 2 custom middleware to demo how to do request validation, as well as error handling in Express/Restify
 ```
 const errors = require('restify-errors')
 
@@ -204,6 +204,163 @@ server.use(ensureHeaderContentType)
 server.use(logErrors)
 ...
 ```
+
+## Step 06. There is a couple of ways to auth user with jwt token.
+### Solution A: Use Passport Local strategy
+```
+// passport.js, which defines who to authenticate an user
+
+const passport = require('passport')
+const bcrypt = require('bcryptjs')
+const User = require('./models/User')
+const LocalStrategy = require('passport-local').Strategy
+
+passport.use(
+  new LocalStrategy(
+    {
+      usernameField: 'email',
+      passwordField: 'password'
+    },
+    // done is a method called internally by the strategy implementation.
+    async (email, password, done) => {
+      // The returned user object is pre-formatted and will be storing in JWT
+      try {
+        const user = await User.findOne({ email })
+        if (!user)
+          return done(null, false, { message: 'Incorrect email or password.' })
+
+        // check is user password is match
+        const isMatch = await bcrypt.compare(password, user.password)
+        if (!isMatch)
+          return done(null, false, { message: 'Incorrect password!' })
+
+        //When success is called, it can attach the user to the request or do other things
+        return done(null, user, { message: 'Logged In Successfully' })
+      } catch (err) {
+        err => done(err)
+      }
+    }
+  )
+)
+
+```
+
+And create a login route
+```
+const jwt = require('jsonwebtoken')
+// not the passport.js we wrote, but the lib itself
+const passport = require('passport')
+require('dotenv').config()
+
+module.exports = server => {
+  server.post('/auth/login', async (req, res, next) => {
+    // using passport local to login user
+    // err, user, info are read from 'done' callback method, which is internally used by Passport strategy
+    passport.authenticate('local', { session: false }, (err, user, info) => {
+      if (err) return res.send(err)
+      if (!err && !user) return res.send(info)
+      req.login(user, { session: false }, err => {
+        if (err) {
+          res.send(err)
+        }
+        // generate a signed son web token with the contents of user object and return it in the response
+        const token = jwt.sign(user.toJSON(), process.env.JWT_SECRET, {
+          expiresIn: 604800 // 1 week
+        })
+        // get issue at and expire date
+        const { iat, exp } = jwt.decode(token)
+        // the sub claim must be unique.
+        return res.send({ iat, exp, sub: user._id, name: user.name, token })
+      })
+    })(req, res)
+    next()
+  })
+}
+
+```
+
+and protect all routes except '/auth/login'
+```
+const restify = require('restify')
+const { ensureHeaderContentType, logErrors } = require('./middleware')
+const rjwt = require('restify-jwt-community')
+require('dotenv').config()
+require('./passport')
+require('./db')
+const server = restify.createServer()
+
+require('./routes/users')(server)
+require('./routes/auth')(server)
+
+// middleware
+server.use(restify.plugins.queryParser())
+server.use(restify.plugins.bodyParser())
+server.use(
+  rjwt({ secret: process.env.JWT_SECRET }).unless({ path: ['/auth/login'] })
+)
+// custom middleware to ensure the request ContentType is application/json
+server.use(ensureHeaderContentType)
+// check error message in console
+server.use(logErrors)
+
+server.listen(process.env.PORT, () => {
+  console.log(`server listening at ${process.env.PORT}`)
+})
+
+```
+
+
+### Solution B: Write your own auth logic(much simpler)
+```
+// /services/authService.js
+const bcrypt = require('bcryptjs')
+const User = require('../models/User')
+
+const authenticate = async ({ email, password }) => {
+  return new Promise(async (resolve, reject) => {
+    try {
+      const user = await User.findOne({ email })
+      if (!user) reject(new Error('Email was not registered'))
+      const isMatch = await bcrypt.compare(password, user.password)
+      if (isMatch) resolve(user)
+      else reject(new Error('Invalid credentials.'))
+    } catch (err) {
+      return reject(err)
+    }
+  })
+}
+
+module.exports = {
+  authenticate
+}
+
+```
+
+Then use it in your auth route
+```
+const jwt = require('jsonwebtoken')
+const errors = require('restify-errors')
+require('dotenv').config()
+const auth = require('../services/authService')
+
+module.exports = server => {
+  server.post('/auth/login', async (req, res, next) => {
+    try {
+      const user = await auth.authenticate(req.body)
+      const token = jwt.sign(user.toJSON(), process.env.JWT_SECRET, {
+        expiresIn: '15m'
+      })
+      // get issue at and expire date
+      const { iat, exp } = jwt.decode(token)
+      // the sub claim must be unique.
+      res.send({ iat, exp, sub: user._id, name: user.name, token })
+      next()
+    } catch (err) {
+      return next(new errors.UnauthorizedError(err))
+    }
+  })
+}
+``` 
 
 
 
