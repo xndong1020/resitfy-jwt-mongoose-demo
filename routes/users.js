@@ -1,6 +1,6 @@
 const errors = require('restify-errors')
 const User = require('../models/User')
-const bcrypt = require('bcryptjs')
+
 
 module.exports = server => {
   server.get('/users', async (req, res, next) => {
@@ -26,16 +26,8 @@ module.exports = server => {
 
   server.post('/users', async (req, res, next) => {
     try {
-      const { password } = req.body
-
-      if (!password || password.length < 6) throw new Error('Invalid password.')
-
-      const salt = await bcrypt.genSalt(10)
-      const hash = await bcrypt.hash(password, salt)
-
-      const userHashed = { ...req.body, password: hash }
-
-      const user = await User.create(userHashed)
+      // we use Mongoose pre save hook to hash password
+      const user = await User.create(req.body)
       res.send(user)
       next() //for Restify, whenever you are done, you need to call next()
     } catch (err) {

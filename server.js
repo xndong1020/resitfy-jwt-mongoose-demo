@@ -1,6 +1,7 @@
 const restify = require('restify')
 const { ensureHeaderContentType, logErrors } = require('./middleware')
 const rjwt = require('restify-jwt-community')
+const compression = require('compression')
 require('dotenv').config()
 // require('./passport')
 require('./db')
@@ -12,6 +13,8 @@ require('./routes/auth')(server)
 // middleware
 server.use(restify.plugins.queryParser())
 server.use(restify.plugins.bodyParser())
+
+server.use(compression())
 server.use(
   rjwt({ secret: process.env.JWT_SECRET }).unless({ path: ['/auth/login'] })
 )

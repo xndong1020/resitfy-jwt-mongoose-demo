@@ -2,7 +2,8 @@ const mongoose = require('mongoose')
 const bluebird = require('bluebird')
 require('dotenv').config() // to read value of process.env.MongoURI
 
-mongoose.set('userFindAndModify', false)
+mongoose.set('useCreateIndex', true)
+mongoose.set('useFindAndModify', false)
 mongoose
   .connect(process.env.MONGODB_URL, { useNewUrlParser: true })
   .then(() => console.log('Mongodb connected'))
